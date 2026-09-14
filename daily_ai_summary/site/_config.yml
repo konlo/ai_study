@@ -1,3 +1,9 @@
 title: Daily AI Summary
-description: Automated daily AI news summaries.
+description: AI 뉴스 최신 기사와 출처별 RSS 발췌
+lang: ko
+timezone: Asia/Seoul
 theme: minima
+url: https://konlo.github.io
+baseurl: /ai_study
+header_pages:
+  - index.md

@@ -1,93 +1,136 @@
 #!/usr/bin/env python3
-"""fetch_summarize.py
-Fetch latest AI articles from the curated source list, select top 5 (by publish date), generate short summaries using Gemini, and write a markdown file for the day.
+"""Collect the five latest dated AI feed articles; no paid AI API is used."""
+import calendar
+import datetime as dt
+import html
+import re
+import sys
+from concurrent.futures import ThreadPoolExecutor
+from html.parser import HTMLParser
+from pathlib import Path
+from urllib.parse import urlsplit
+from zoneinfo import ZoneInfo
 
-Requirements (install via pip):
-  feedparser, requests, python-dotenv
-  (Gemini SDK will be used via `google.generativeai`).
-"""
-
-import os
-import datetime
 import feedparser
 import requests
-from pathlib import Path
 
-# Load environment variables (e.g., GEMINI_API_KEY) from .env if present
-from dotenv import load_dotenv
-load_dotenv()
+ROOT = Path(__file__).resolve().parents[1]
 
-# Gemini integration removed – using simple snippet as summary
 
-def read_sources(file_path: Path):
+class PlainText(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.parts = []
+        self.hidden = 0
+
+    def handle_starttag(self, tag, attrs):
+        if tag in ('script', 'style'):
+            self.hidden += 1
+        if tag in ('p', 'br', 'div', 'li'):
+            self.parts.append(' ')
+
+    def handle_endtag(self, tag):
+        if tag in ('script', 'style'):
+            self.hidden = max(0, self.hidden - 1)
+        self.parts.append(' ')
+
+    def handle_data(self, data):
+        if not self.hidden:
+            self.parts.append(data)
+
+
+def plain(value):
+    parser = PlainText()
+    parser.feed(value)
+    return ' '.join(''.join(parser.parts).split())
+
+
+def read_sources(path):
     sources = []
-    with open(file_path, "r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if line.startswith("|") and "http" in line:
-                # split by | and grab the last column (URL)
-                parts = [p.strip() for p in line.split("|")]
-                url = parts[-1]
-                sources.append(url)
+    for line in path.read_text(encoding='utf-8').splitlines():
+        cells = [cell.strip() for cell in line.strip().strip('|').split('|')]
+        if len(cells) == 3 and cells[2].startswith('https://'):
+            sources.append((cells[0], cells[2]))
+    if not sources:
+        raise ValueError('No RSS sources configured')
     return sources
 
-def fetch_feed(url: str, max_items: int = 20):
+
+def fetch_feed(source):
+    name, url = source
     try:
-        d = feedparser.parse(url)
-        return d.entries[:max_items]
-    except Exception as e:
-        print(f"Failed to fetch {url}: {e}")
+        response = requests.get(url, timeout=(10, 30), headers={'User-Agent': 'DailyAISummary/1.0 RSS reader'})
+        response.raise_for_status()
+        feed = feedparser.parse(response.content)
+        if not feed.entries:
+            raise ValueError('No feed entries')
+        entries = []
+        for entry in feed.entries:
+            published = entry.get('published_parsed') or entry.get('updated_parsed')
+            link = entry.get('link', '')
+            if not published or urlsplit(link).scheme not in ('http', 'https'):
+                continue
+            entries.append({'title': plain(entry.get('title', '(untitled)')),
+                            'link': link, 'source': name,
+                            'timestamp': calendar.timegm(published),
+                            'summary': plain(entry.get('summary', ''))})
+        print(f'{name}: {len(entries)} dated articles', file=sys.stderr)
+        return entries
+    except (requests.RequestException, ValueError) as exc:
+        print(f'WARNING {name}: {exc}', file=sys.stderr)
         return []
 
-def select_top_articles(entries, limit=5):
-    # Sort by published date (newest first)
-    sorted_entries = sorted(
-        entries,
-        key=lambda e: e.get("published_parsed", None) or e.get("updated_parsed", None),
-        reverse=True,
-    )
-    return sorted_entries[:limit]
 
-def summarize_article(title: str, link: str, snippet: str):
-    """Return a short two‑sentence summary using the article snippet."""
-    # Use the first two sentences of the snippet if possible.
-    sentences = [s.strip() for s in snippet.split('.') if s.strip()]
-    if len(sentences) >= 2:
-        short = ". ".join(sentences[:2]) + "."
-    else:
-        short = snippet.strip()
-    return short
+def select_top_articles(entries, limit=5, now=None):
+    now = now if now is not None else dt.datetime.now(dt.timezone.utc).timestamp()
+    selected, seen = [], set()
+    for entry in sorted(entries, key=lambda e: e['timestamp'], reverse=True):
+        link = entry['link'].split('#')[0]
+        if entry['timestamp'] > now or link in seen:
+            continue
+        seen.add(link)
+        selected.append(entry)
+        if len(selected) == limit:
+            break
+    return selected
+
+
+def excerpt(text):
+    # Short attributed feed excerpt; never imply a generated/translated summary.
+    words = text.split()
+    result = ' '.join(words[:40])
+    if len(words) > 40:
+        result += '…'
+    return result or '요약문이 제공되지 않았습니다. 원문 링크를 확인하세요.'
+
+
+def escape(text):
+    return html.escape(text).replace('|', '&#124;').replace('[', '&#91;').replace(']', '&#93;').replace('{', '&#123;').replace('}', '&#125;')
+
 
 def main():
-    project_root = Path(__file__).resolve().parents[2]  # daily_ai_summary
-    src_file = project_root / "sources.md"
-    sources = read_sources(src_file)
-    all_entries = []
-    for src in sources:
-        entries = fetch_feed(src)
-        all_entries.extend(entries)
-    top_five = select_top_articles(all_entries, limit=5)
+    sources = read_sources(ROOT / 'feeds.md')
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        entries = [e for group in pool.map(fetch_feed, sources) for e in group]
+    articles = select_top_articles(entries)
+    if len(articles) < 5:
+        raise SystemExit(f'Only {len(articles)} valid articles; existing output preserved.')
+    today = dt.datetime.now(ZoneInfo('Asia/Seoul')).date().isoformat()
+    lines = ['---', 'layout: page', f'title: "AI 뉴스 · {today}"', f'summary_date: "{today}"', '---', '',
+             '수집 시점 기준 최신 기사 5개입니다. 발행일은 아래에 표시하며, 오늘 발행된 기사만으로 제한하지 않습니다.', '',
+             '요약은 RSS에서 제공한 설명의 짧은 발췌입니다. AI 생성·번역 요약이 아닙니다.', '']
+    for article in articles:
+        date = dt.datetime.fromtimestamp(article['timestamp'], ZoneInfo('Asia/Seoul')).strftime('%Y-%m-%d %H:%M KST')
+        lines += [f"## {escape(article['title'])}", '', f"{escape(article['source'])} · {date}", '',
+                  escape(excerpt(article['summary'])), '',
+                  f'<a href="{html.escape(article["link"], quote=True)}">원문 읽기</a>', '']
+    output = ROOT / 'site' / 'content' / f'{today}.md'
+    output.parent.mkdir(parents=True, exist_ok=True)
+    temporary = output.with_suffix('.tmp')
+    temporary.write_text('\n'.join(lines), encoding='utf-8')
+    temporary.replace(output)
+    print(f'Wrote {output}: {len(articles)} articles')
 
-    summaries = []
-for e in top_five:
-    title = e.get("title", "(no title)")
-    link = e.get("link", "#")
-    snippet = e.get("summary", "")
-    short = summarize_article(title, link, snippet)
-    summaries.append({"title": title, "link": link, "summary": short})
 
-    # Write markdown file
-    today = datetime.date.today().isoformat()
-    output_dir = project_root / "site" / "content"
-    output_dir.mkdir(parents=True, exist_ok=True)
-    out_path = output_dir / f"{today}.md"
-    with open(out_path, "w", encoding="utf-8") as f:
-        f.write(f"# AI News Summary – {today}\n\n")
-        f.write("| Title | Source | Summary |\n")
-        f.write("|---|---|---|\n")
-        for s in summaries:
-            f.write(f"| [{s['title']}]({s['link']}) | {s['link']} | {s['summary']} |\n")
-    print(f"Wrote summary to {out_path}")
-
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()
