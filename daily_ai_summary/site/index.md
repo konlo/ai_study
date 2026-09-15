@@ -1,18 +1,24 @@
 ---
-layout: home
+layout: page
 title: AI 뉴스 모아보기
 ---
 
-AI 관련 최신 기사 5개와 원문 링크를 모읍니다. 요약은 각 출처가 제공한 RSS 설명의 짧은 발췌입니다.
+국내 매체의 **한국 뉴스 요약**과 해외 매체의 **영문·한국어 요약**을 모읍니다.
+
+[한국 뉴스 출처 목록]({{ "/sources-korea.html" | relative_url }})
 
 {% assign summaries = site.pages | where_exp: "page", "page.summary_date" | sort: "summary_date" | reverse %}
-{% for summary in summaries %}
-{% if forloop.first %}
-## 최신 요약
+{% assign korean = summaries | where: "edition", "korea" %}
+{% assign global = summaries | where: "edition", "global" %}
 
-[{{ summary.title }}]({{ summary.url | relative_url }})
+## 한국 뉴스
 
-## 날짜별 기록
-{% endif %}
-- [{{ summary.summary_date }}]({{ summary.url | relative_url }})
+{% for summary in korean %}
+- [{{ summary.title }}]({{ summary.url | relative_url }}){% if forloop.first %} — 최신{% endif %}
+{% endfor %}
+
+## 해외 뉴스 · 한글/영문
+
+{% for summary in global %}
+- [{{ summary.title }}]({{ summary.url | relative_url }}){% if forloop.first %} — 최신{% endif %}
 {% endfor %}

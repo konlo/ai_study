@@ -56,6 +56,15 @@ def read_sources(path):
     return sources
 
 
+def entry_timestamp(entry, source_name):
+    raw = entry.get('published', '')
+    # AI타임스 publishes local Korean time without a timezone suffix.
+    if source_name == 'AI타임스' and re.fullmatch(r'\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}', raw):
+        return dt.datetime.strptime(raw, '%Y-%m-%d %H:%M:%S').replace(tzinfo=ZoneInfo('Asia/Seoul')).timestamp()
+    parsed = entry.get('published_parsed') or entry.get('updated_parsed')
+    return calendar.timegm(parsed) if parsed else None
+
+
 def fetch_feed(source):
     name, url = source
     try:
@@ -66,13 +75,13 @@ def fetch_feed(source):
             raise ValueError('No feed entries')
         entries = []
         for entry in feed.entries:
-            published = entry.get('published_parsed') or entry.get('updated_parsed')
+            published = entry_timestamp(entry, name)
             link = entry.get('link', '')
-            if not published or urlsplit(link).scheme not in ('http', 'https'):
+            if published is None or urlsplit(link).scheme not in ('http', 'https'):
                 continue
             entries.append({'title': plain(entry.get('title', '(untitled)')),
                             'link': link, 'source': name,
-                            'timestamp': calendar.timegm(published),
+                            'timestamp': published,
                             'summary': plain(entry.get('summary', ''))})
         print(f'{name}: {len(entries)} dated articles', file=sys.stderr)
         return entries
@@ -116,7 +125,7 @@ def main():
     if len(articles) < 5:
         raise SystemExit(f'Only {len(articles)} valid articles; existing output preserved.')
     today = dt.datetime.now(ZoneInfo('Asia/Seoul')).date().isoformat()
-    lines = ['---', 'layout: page', f'title: "AI 뉴스 · {today}"', f'summary_date: "{today}"', '---', '',
+    lines = ['---', 'layout: page', f'title: "AI 뉴스 · {today}"', f'summary_date: "{today}"', 'edition: global', '---', '',
              '수집 시점 기준 최신 기사 5개입니다. 발행일은 아래에 표시하며, 오늘 발행된 기사만으로 제한하지 않습니다.', '',
              '요약은 RSS에서 제공한 설명의 짧은 발췌입니다. AI 생성·번역 요약이 아닙니다.', '']
     for article in articles:

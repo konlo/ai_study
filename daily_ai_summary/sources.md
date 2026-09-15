@@ -16,3 +16,9 @@ Below is a curated list of widely‑read technology news outlets that frequently
 |10 | **OpenAI Blog** | Updates from OpenAI | https://openai.com/blog |
 
 Feel free to add or remove sources based on your preferences. You can automate fetching the latest articles from these URLs using an RSS reader or a simple web‑scraping script.
+
+## 한국 뉴스
+
+국내 매체 목록과 선정 근거·연결 상태는 [한국 뉴스 출처](site/sources-korea.md)에 정리했습니다.
+실제 수집용 RSS 6개는 [feeds_ko.md](feeds_ko.md)에서 관리합니다.
+AI타임스, ZDNET Korea를 필수 검토 대상으로 포함하며 전자신문·동아일보·SBS·연합뉴스TV도 수집합니다.
