@@ -1,0 +1,4 @@
+interface:
+  display_name: "국내·해외 AI 뉴스 요약"
+  short_description: "국내·해외 AI 뉴스 수집, 한국어 요약과 번역, GitHub Pages 배포"
+  default_prompt: "$daily-ai-news 오늘 국내·해외 AI 뉴스를 각각 5개씩 요약하고, 해외 기사는 한국어 번역을 함께 저장한 뒤 배포해줘."
